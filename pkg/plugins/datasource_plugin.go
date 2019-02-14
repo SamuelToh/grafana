@@ -32,8 +32,9 @@ type DataSourcePlugin struct {
 	Backend    bool   `json:"backend,omitempty"`
 	Executable string `json:"executable,omitempty"`
 
-	log    log.Logger
-	client *plugin.Client
+	log       log.Logger
+	client    *plugin.Client
+	NoRespawn bool
 }
 
 func (p *DataSourcePlugin) Load(decoder *json.Decoder, pluginDir string) error {
@@ -105,7 +106,7 @@ func (p *DataSourcePlugin) restartKilledProcess(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if p.client.Exited() {
+			if p.NoRespawn == false && p.client.Exited() {
 				err := p.spawnSubProcess()
 				p.log.Debug("Spawning new sub process", "name", p.Name, "id", p.Id)
 				if err != nil {

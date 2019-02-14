@@ -39,7 +39,9 @@ type PluginScanner struct {
 }
 
 type PluginManager struct {
-	log log.Logger
+	log            log.Logger
+	PluginTicker   *time.Ticker
+	GrafanaContext context.Context
 }
 
 func init() {
@@ -50,6 +52,11 @@ func (pm *PluginManager) Init() error {
 	pm.log = log.New("plugins")
 	plog = log.New("plugins")
 
+	pm.log.Info("Starting plugin search")
+	return findAndInitPlugins()
+}
+
+func findAndInitPlugins() error {
 	DataSources = map[string]*DataSourcePlugin{}
 	StaticRoutes = []*PluginStaticRoute{}
 	Panels = map[string]*PanelPlugin{}
@@ -62,7 +69,6 @@ func (pm *PluginManager) Init() error {
 		"renderer":   RendererPlugin{},
 	}
 
-	pm.log.Info("Starting plugin search")
 	scan(path.Join(setting.StaticRootPath, "app/plugins"))
 
 	// check if plugins dir exists
@@ -107,24 +113,40 @@ func (pm *PluginManager) startBackendPlugins(ctx context.Context) error {
 	return nil
 }
 
+func (pm *PluginManager) ReloadPlugins() error {
+	pm.PluginTicker.Stop()
+	for _, ds := range DataSources {
+		ds.NoRespawn = true
+		ds.Kill()
+	}
+
+	if err := findAndInitPlugins(); err != nil {
+		return err
+	}
+	go pm.Run(pm.GrafanaContext)
+
+	return nil
+}
+
 func (pm *PluginManager) Run(ctx context.Context) error {
 	pm.startBackendPlugins(ctx)
 	pm.updateAppDashboards()
 	pm.checkForUpdates()
 
-	ticker := time.NewTicker(time.Minute * 10)
+	pm.PluginTicker = time.NewTicker(time.Minute * 10)
+	pm.GrafanaContext = ctx
 	run := true
 
 	for run {
 		select {
-		case <-ticker.C:
+		case <-pm.PluginTicker.C:
 			pm.checkForUpdates()
 		case <-ctx.Done():
 			run = false
 		}
 	}
 
-	// kil backend plugins
+	// kill backend plugins
 	for _, p := range DataSources {
 		p.Kill()
 	}
